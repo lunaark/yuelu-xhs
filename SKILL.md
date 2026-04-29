@@ -1,6 +1,6 @@
 ---
 name: yuelu-xhs
-description: 月鹿小红书图文生成器。把 Markdown 文章转成小红书轮播图（白底黑字 + 图文混排 + 月鹿造物页脚），Notion Exporter 同款风格。当用户说"/yuelu-xhs"、"把这篇文章转成小红书"、"做小红书图文"、"做小红书轮播图"、"把 xxx 排成小红书"时触发。输入：一个 Markdown 文件路径；输出：一组 PNG 图片 + HTML 预览页。
+description: 小红书图文生成器（Notion Exporter 风格）。把 Markdown 文章转成小红书轮播图 PNG，白底黑字、图文混排、左下品牌名（可配置）+ 右下页码。跑完自动弹 Finder，按空格 QuickLook 预览。当用户说"/yuelu-xhs"、"把这篇文章转成小红书"、"做小红书图文"、"做小红书轮播图"、"把 xxx 排成小红书"时触发。输入：一个 Markdown 文件路径；输出：一组 PNG 图片。
 ---
 
 # 月鹿小红书图文生成器（yuelu-xhs）
@@ -55,33 +55,46 @@ node ~/.claude/skills/yuelu-xhs/md-to-xhs.mjs <md路径>
 ```
 
 输出在 `<md同目录>/<slug>-xhs/`：
-- `<slug>-preview.html` —— 浏览器预览（所有页并排展示）
-- `<slug>-01.png` ~ `<slug>-NN.png` —— 各页 PNG
+- `<slug>-01.png` ~ `<slug>-NN.png` —— 各页 PNG（无 HTML 预览，无临时文件）
 
-脚本会打印总页数。
+脚本会打印总页数，并自动 `open` 输出目录弹出 Finder。
 
-### Step 4：打开预览
+### Step 4：在 Finder 里看图
 
-```bash
-open "<输出目录>/<slug>-preview.html"
-```
+脚本跑完 Finder 已自动弹出。用户在 Finder 里：
+- 按 **空格** 触发 QuickLook 大图预览，左右键翻页
+- 全选 → 右键「压缩」打包 ZIP
+
+不需要 HTML 预览，不需要浏览器。
 
 ### Step 5：报告
 
 简明告知：
 - 总页数
 - 输出目录路径
-- 提醒用户在浏览器看效果，如果某页不满意，告诉你要改什么
+- Finder 已弹出，按空格预览
+- 如果某页不满意，告诉你要改什么
 
 ## 关键约定
 
 | 项 | 值 | 备注 |
 |---|---|---|
 | 页面尺寸 | 1242 × 1656 | 小红书 3:4 |
-| 页脚 | 176px，左下"月鹿造物" + 右下"页码/总数" | 不放小红书号（小红书 App 自带账号水印） |
+| 页脚 | 176px，左下品牌名（可配置）+ 右下"页码/总数" | 不放小红书号（小红书 App 自带账号水印） |
 | 字号 | 正文 34px / 行距 1.6 | |
 | 切页方式 | 真浏览器测量 + 贪心切页 | 不靠估算 |
 | 图片处理 | 等所有图片完整加载后量真实尺寸 | 不会被裁 |
+
+## 页脚品牌配置
+
+左下角文字默认空，按以下优先级解析：
+
+1. CLI 参数：`node md-to-xhs.mjs <md> --footer "你的品牌"`
+2. md frontmatter：文章顶部加 `footer: 你的品牌`
+3. 配置文件：`~/.config/md-to-xhs.json` 写 `{"footer": "你的品牌"}`
+4. 默认空（左下空白，右下页码仍保留）
+
+月鹿自己已在 `~/.config/md-to-xhs.json` 配了「月鹿造物」，无需每次传参。
 
 ## 不该做的事
 

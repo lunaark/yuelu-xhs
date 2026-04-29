@@ -2,10 +2,11 @@
 // Markdown → 小红书图文（Notion Exporter 风格）
 // 用法：node tools/md-to-xhs.mjs <markdown文件> [输出目录]
 
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, resolve, join } from "node:path";
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { tmpdir, homedir } from "node:os";
 
 const globalRoot = execSync("npm root -g", { encoding: "utf8" }).trim();
 const require = createRequire(import.meta.url);
@@ -22,7 +23,7 @@ const PADDING_BOTTOM = 32;
 const PADDING_X = 75;
 const SAFE_MARGIN = 20;      // 测量准确后的小安全垫
 const CONTENT_H = PAGE_H - FOOTER_H - PADDING_TOP - PADDING_BOTTOM - SAFE_MARGIN;
-const FOOTER_LABEL = "月鹿造物";
+const DEFAULT_FOOTER = "";
 const FONT_SIZE_BODY = 34;
 const LINE_HEIGHT_BODY = 1.6;
 const CHARS_PER_LINE = 25;
@@ -74,22 +75,36 @@ const PAGE_CSS = `
   }
 `;
 
-if (args.length < 1) {
-  console.error("用法：node tools/md-to-xhs.mjs <markdown文件> [输出目录]");
+// 解析 CLI: --footer "xxx" 可放任意位置；位置参数依次是 mdPath、outDir
+let cliFooter = null;
+const positional = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--footer") { cliFooter = args[++i] ?? ""; continue; }
+  if (args[i].startsWith("--footer=")) { cliFooter = args[i].slice(9); continue; }
+  positional.push(args[i]);
+}
+
+if (positional.length < 1) {
+  console.error("用法：node md-to-xhs.mjs <markdown文件> [输出目录] [--footer \"品牌名\"]");
   process.exit(1);
 }
 
-const mdPath = resolve(args[0]);
+const mdPath = resolve(positional[0]);
 if (!existsSync(mdPath)) {
   console.error(`文件不存在：${mdPath}`);
   process.exit(1);
 }
 
 const slug = basename(mdPath, extname(mdPath));
-const outDir = resolve(args[1] || join(dirname(mdPath), `${slug}-xhs`));
+const outDir = resolve(positional[1] || join(dirname(mdPath), `${slug}-xhs`));
 mkdirSync(outDir, { recursive: true });
 
-const md = readFileSync(mdPath, "utf8");
+const rawMd = readFileSync(mdPath, "utf8");
+const { frontmatter, body: md } = stripFrontmatter(rawMd);
+
+// 页脚优先级：CLI > frontmatter > config > 默认空
+const FOOTER_LABEL = cliFooter ?? frontmatter.footer ?? readConfigFooter() ?? DEFAULT_FOOTER;
+
 const blocks = parseMarkdown(md, dirname(mdPath));
 
 console.log(`解析得 ${blocks.length} 个块`);
@@ -100,15 +115,38 @@ console.log(`测量完成：[${heights.slice(0, 5).join(", ")}...]`);
 const pages = paginateByRealHeights(blocks, heights);
 console.log(`真实切页完成：${pages.length} 页`);
 
-const html = renderHtml(pages, slug);
-const htmlPath = join(outDir, `${slug}-preview.html`);
-writeFileSync(htmlPath, html, "utf8");
-console.log(`HTML 预览：${htmlPath}`);
+const html = renderScreenshotHtml(pages);
+const tmpHtmlPath = join(tmpdir(), `md-to-xhs-${Date.now()}.html`);
+writeFileSync(tmpHtmlPath, html, "utf8");
 
-await screenshotAll(htmlPath, pages.length, outDir, slug);
+await screenshotAll(tmpHtmlPath, pages.length, outDir, slug);
+try { unlinkSync(tmpHtmlPath); } catch {}
+
 console.log(`完成：${outDir}`);
+try { execSync(`open ${JSON.stringify(outDir)}`); } catch {}
 
 // ======================== Markdown 解析 ========================
+
+// 极简 frontmatter 解析：仅支持 ---/--- 包裹的 key: value 行
+function stripFrontmatter(raw) {
+  const m = raw.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!m) return { frontmatter: {}, body: raw };
+  const fm = {};
+  for (const line of m[1].split("\n")) {
+    const kv = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+    if (kv) fm[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return { frontmatter: fm, body: raw.slice(m[0].length) };
+}
+
+function readConfigFooter() {
+  const path = join(homedir(), ".config", "md-to-xhs.json");
+  if (!existsSync(path)) return null;
+  try {
+    const cfg = JSON.parse(readFileSync(path, "utf8"));
+    return typeof cfg.footer === "string" ? cfg.footer : null;
+  } catch { return null; }
+}
 
 function parseMarkdown(text, baseDir) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -313,7 +351,7 @@ function paginateByRealHeights(blocks, heights) {
 
 // ======================== 渲染 HTML ========================
 
-function renderHtml(pages, slug) {
+function renderScreenshotHtml(pages) {
   const total = pages.length;
   const pagesHtml = pages.map((blocks, idx) => `
     <section class="page" id="page-${idx + 1}">
@@ -327,22 +365,17 @@ function renderHtml(pages, slug) {
     </section>
   `).join("\n");
 
-  // 给前端 JS 用：所有 PNG 文件名，用脚本输出的同名命名规则
-  const pngNames = pages.map((_, idx) => `${slug}-${String(idx + 1).padStart(2, "0")}.png`);
-
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(slug)} · 小红书预览</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    background: #e8e8e8;
+    background: #fff;
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     color: #1a1a1a;
   }
-  body { padding: 40px 0; display: flex; flex-direction: column; align-items: center; gap: 40px; }
   .page {
     width: ${PAGE_W}px;
     height: ${PAGE_H}px;
@@ -444,98 +477,10 @@ function renderHtml(pages, slug) {
   }
   footer .brand { font-weight: 600; color: #444; }
   footer .pageno { color: #888; }
-
-  /* 浮动下载按钮 */
-  .download-bar {
-    position: fixed;
-    top: 24px;
-    right: 24px;
-    background: #1a1a1a;
-    color: #fff;
-    border-radius: 12px;
-    padding: 14px 20px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.18);
-    font-size: 15px;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    min-width: 220px;
-  }
-  .download-bar .title {
-    font-weight: 600;
-    font-size: 14px;
-    color: #ddd;
-  }
-  .download-bar button {
-    background: #fff;
-    color: #1a1a1a;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  .download-bar button:hover { background: #f0f0f0; }
-  .download-bar button:disabled { background: #555; color: #aaa; cursor: wait; }
-  .download-bar .hint { font-size: 12px; color: #888; }
-  .download-bar .progress {
-    font-size: 12px;
-    color: #aaa;
-    min-height: 16px;
-  }
 </style>
 </head>
 <body>
-<div class="download-bar">
-  <div class="title">📦 ${escapeHtml(slug)} · ${total} 张</div>
-  <button id="btn-zip">下载全部（ZIP）</button>
-  <div class="progress" id="progress">点击按钮开始打包</div>
-  <div class="hint">PNG 已生成在同目录下</div>
-</div>
-
 ${pagesHtml}
-
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script>
-const PNG_FILES = ${JSON.stringify(pngNames)};
-const ZIP_NAME = ${JSON.stringify(`${slug}-小红书.zip`)};
-
-document.getElementById("btn-zip").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-zip");
-  const progress = document.getElementById("progress");
-  btn.disabled = true;
-  try {
-    const zip = new JSZip();
-    for (let i = 0; i < PNG_FILES.length; i++) {
-      const name = PNG_FILES[i];
-      progress.textContent = \`抓取 \${i + 1} / \${PNG_FILES.length}：\${name}\`;
-      const resp = await fetch(name);
-      if (!resp.ok) throw new Error(\`无法读取 \${name}（HTTP \${resp.status}）\`);
-      const blob = await resp.blob();
-      zip.file(name, blob);
-    }
-    progress.textContent = "正在压缩...";
-    const zipBlob = await zip.generateAsync({ type: "blob" }, (meta) => {
-      progress.textContent = \`压缩中 \${Math.round(meta.percent)}%\`;
-    });
-    const url = URL.createObjectURL(zipBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = ZIP_NAME;
-    a.click();
-    URL.revokeObjectURL(url);
-    progress.textContent = \`✅ 已下载 \${ZIP_NAME}\`;
-  } catch (e) {
-    progress.textContent = "❌ " + e.message;
-    console.error(e);
-  } finally {
-    btn.disabled = false;
-  }
-});
-</script>
 </body>
 </html>`;
 }
