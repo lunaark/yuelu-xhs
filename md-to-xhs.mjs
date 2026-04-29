@@ -327,6 +327,9 @@ function renderHtml(pages, slug) {
     </section>
   `).join("\n");
 
+  // 给前端 JS 用：所有 PNG 文件名，用脚本输出的同名命名规则
+  const pngNames = pages.map((_, idx) => `${slug}-${String(idx + 1).padStart(2, "0")}.png`);
+
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -441,10 +444,98 @@ function renderHtml(pages, slug) {
   }
   footer .brand { font-weight: 600; color: #444; }
   footer .pageno { color: #888; }
+
+  /* 浮动下载按钮 */
+  .download-bar {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    background: #1a1a1a;
+    color: #fff;
+    border-radius: 12px;
+    padding: 14px 20px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+    font-size: 15px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 220px;
+  }
+  .download-bar .title {
+    font-weight: 600;
+    font-size: 14px;
+    color: #ddd;
+  }
+  .download-bar button {
+    background: #fff;
+    color: #1a1a1a;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .download-bar button:hover { background: #f0f0f0; }
+  .download-bar button:disabled { background: #555; color: #aaa; cursor: wait; }
+  .download-bar .hint { font-size: 12px; color: #888; }
+  .download-bar .progress {
+    font-size: 12px;
+    color: #aaa;
+    min-height: 16px;
+  }
 </style>
 </head>
 <body>
+<div class="download-bar">
+  <div class="title">📦 ${escapeHtml(slug)} · ${total} 张</div>
+  <button id="btn-zip">下载全部（ZIP）</button>
+  <div class="progress" id="progress">点击按钮开始打包</div>
+  <div class="hint">PNG 已生成在同目录下</div>
+</div>
+
 ${pagesHtml}
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+const PNG_FILES = ${JSON.stringify(pngNames)};
+const ZIP_NAME = ${JSON.stringify(`${slug}-小红书.zip`)};
+
+document.getElementById("btn-zip").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-zip");
+  const progress = document.getElementById("progress");
+  btn.disabled = true;
+  try {
+    const zip = new JSZip();
+    for (let i = 0; i < PNG_FILES.length; i++) {
+      const name = PNG_FILES[i];
+      progress.textContent = \`抓取 \${i + 1} / \${PNG_FILES.length}：\${name}\`;
+      const resp = await fetch(name);
+      if (!resp.ok) throw new Error(\`无法读取 \${name}（HTTP \${resp.status}）\`);
+      const blob = await resp.blob();
+      zip.file(name, blob);
+    }
+    progress.textContent = "正在压缩...";
+    const zipBlob = await zip.generateAsync({ type: "blob" }, (meta) => {
+      progress.textContent = \`压缩中 \${Math.round(meta.percent)}%\`;
+    });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = ZIP_NAME;
+    a.click();
+    URL.revokeObjectURL(url);
+    progress.textContent = \`✅ 已下载 \${ZIP_NAME}\`;
+  } catch (e) {
+    progress.textContent = "❌ " + e.message;
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
 </body>
 </html>`;
 }
