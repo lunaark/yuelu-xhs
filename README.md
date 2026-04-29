@@ -1,8 +1,8 @@
 # yuelu-xhs
 
-> 一个把 Markdown 文章自动切页、排版成小红书轮播图的 Claude Code Skill。
+> 一个把 Markdown 文章自动切页、排版成小红书轮播图的  Skill。
 >
-> Notion Exporter 同款风格 —— 白底黑字 + 图文混排 + 真浏览器测量切页 + 不被裁。
+> 白底黑字 + 图文混排 + 真浏览器测量切页 + 不被裁。
 
 ## 它做什么
 
@@ -31,11 +31,11 @@ npm install -g playwright
 npx playwright install chromium
 ```
 
-重启 Claude Code 会话，或新开一个会话，就能看到 `yuelu-xhs` skill 已加载。
+重启会话，或新开一个会话，就能看到 `yuelu-xhs` skill 已加载。
 
 ## 用法
 
-### 在 Claude Code 里（推荐）
+### 在 Claude Code /Codex/Trae里（推荐）
 
 直接用自然语言：
 
@@ -111,19 +111,6 @@ const FOOTER_LABEL = "月鹿造物";  // 改成你自己的署名
 
 YAML front matter、HTML 标签、表格暂不支持（按需可加）。
 
-## 它是怎么来的
-
-这个 skill 是在跟 Claude Code 一起踩着坑做出来的。最初版本走过弯路：
-- 第一版：用 baoyu-xhs-images 那种 AI 生图思路 — 浪费 token，画风跟原文脱节，否了
-- 第二版：模板化"卡片型"切页 — 把段落重写成金句海报，否了
-- 第三版（这版）：Notion Exporter 思路 — 原文不动、按高度切页 — 留下了
-
-中间还踩了 3 个坑：
-1. CSS overflow:hidden 把超出内容直接裁了，但脚本不知道
-2. 图片在 setContent 下不会等加载完，量出来高度全是 22px
-3. 测量容器外包 div 让 CSS 选择器失效，所有块都按默认行高算
-
-详细过程见同作者公众号文章《[mofang skill 创造过程纪实](https://github.com/lunaark/yuelu-xhs/issues/1)》。
 
 ## 作者
 
