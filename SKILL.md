@@ -1,17 +1,19 @@
 ---
 name: yuelu-xhs
-description: 小红书图文生成器（Notion Exporter 风格）。把 Markdown 文章转成小红书轮播图 PNG，白底黑字、图文混排、左下品牌名（可配置）+ 右下页码。跑完自动弹 Finder，按空格 QuickLook 预览。当用户说"/yuelu-xhs"、"把这篇文章转成小红书"、"做小红书图文"、"做小红书轮播图"、"把 xxx 排成小红书"时触发。输入：一个 Markdown 文件路径；输出：一组 PNG 图片。
+description: 小红书图文生成器（Notion Exporter 风格）。把 Markdown、公众号 HTML 或文章 URL 转成小红书轮播图 PNG，白底黑字、图文混排、左下品牌名（可配置）+ 右下页码。跑完自动弹 Finder，按空格 QuickLook 预览。当用户说"/yuelu-xhs"、"把这篇文章转成小红书"、"做小红书图文"、"做小红书轮播图"、"把 xxx 排成小红书"时触发。输入：一个 Markdown/HTML 文件路径或 URL；输出：一组 PNG 图片。
 ---
 
 # 月鹿小红书图文生成器（yuelu-xhs）
 
-把月鹿写的 Markdown 文章自动切页排成小红书轮播图。每张图 1242×1656（小红书 3:4），白底黑字 + 复古绿无关，纯 Notion Exporter 同款风格。
+把月鹿写的 Markdown 文章、公众号 HTML 或文章 URL 自动切页排成小红书轮播图。每张图 1242×1656（小红书 3:4），白底黑字 + 复古绿无关，纯 Notion Exporter 同款风格。
 
 ## 何时触发
 
-- `/yuelu-xhs <md路径>`
+- `/yuelu-xhs <md/html路径或URL>`
 - "把这篇文章转成小红书"
 - "把 xxx.md 排成小红书图文"
+- "把 xxx.html 排成小红书图文"
+- "把 https://mp.weixin.qq.com/... 转成小红书图文"
 - "做小红书轮播图 / 做小红书图文 / 做小红书"
 - "把月鹿这篇文章排成小红书"
 
@@ -19,10 +21,29 @@ description: 小红书图文生成器（Notion Exporter 风格）。把 Markdown
 
 ### Step 1：确认输入
 
-- 用户给了 md 路径 → 用它
-- 用户没给 → 询问哪个 md 文件，或在 `articles/` 目录里选
+- 用户给了 md/html 路径或 URL → 用它
+- 用户没给 → 询问哪个 md/html 文件或公众号链接，或在 `articles/` 目录里选
 
-### Step 2：检测 AI 配图（关键）
+### Step 2：检测图片来源（关键）
+
+如果输入是 URL：
+
+- 脚本会用浏览器打开链接，解析标题、段落、引用、列表和图片
+- 页面打开超时时会自动重试，最多 3 次
+- 如果页面有 `og:image` 且正文里没有同图，会作为普通首图插入最上方
+- 会过滤明显的公众号底部互动、署名来源、关注引导和推荐阅读噪音，并写入 `assets-manifest.json.filtered`
+- 页面 HTML 会保存为 `source.html`
+- 远程图片会缓存到输出目录 `assets/`
+
+如果输入是 `.html/.htm`：
+
+- 脚本会用浏览器解析正文里的标题、段落、引用、列表和图片
+- 如果页面有 `og:image` 且正文里没有同图，会作为普通首图插入最上方
+- 会过滤明显的公众号底部互动、署名来源、关注引导和推荐阅读噪音，并写入 `assets-manifest.json.filtered`
+- 远程图片（如公众号 `mmbiz.qpic.cn`）会缓存到输出目录 `assets/`
+- 用户本地没有配图文件也可以转换，只要 HTML 里保留了 `<img src="...">`
+
+如果输入是 `.md`，继续检查 AI 配图目录：
 
 ⚠️ **必做这一步**，否则 AI 配图不会出现在小红书图里。
 
@@ -51,11 +72,14 @@ grep -E "!\[.*\]\(.*插画.*\)" <md路径>
 ### Step 3：跑脚本
 
 ```bash
-node ~/.claude/skills/yuelu-xhs/md-to-xhs.mjs <md路径>
+node ~/.claude/skills/yuelu-xhs/md-to-xhs.mjs <md/html路径或URL>
 ```
 
-输出在 `<md同目录>/<slug>-xhs/`：
+输出在 `<输入文件同目录>/<slug>-xhs/`；URL 输入未指定输出目录时，输出在当前工作目录：
 - `<slug>-01.png` ~ `<slug>-NN.png` —— 各页 PNG（无 HTML 预览，无临时文件）
+- 远程配图缓存：`<slug>-xhs/assets/`
+- 图片资产清单：`<slug>-xhs/assets-manifest.json`
+- URL 输入原始页面：`<slug>-xhs/source.html`
 
 脚本会打印总页数，并自动 `open` 输出目录弹出 Finder。
 
@@ -84,13 +108,18 @@ node ~/.claude/skills/yuelu-xhs/md-to-xhs.mjs <md路径>
 | 字号 | 正文 34px / 行距 1.6 | |
 | 切页方式 | 真浏览器测量 + 贪心切页 | 不靠估算 |
 | 图片处理 | 等所有图片完整加载后量真实尺寸 | 不会被裁 |
+| 远程图片缓存 | 远程图下载到输出目录 `assets/` | 公众号图文无需本地配图 |
+| 图片失败处理 | 生成可见占位块，并写入 `assets-manifest.json` | 不静默丢图，非图片 content-type 也会拦下 |
+| 长图分级 | 按宽高比自动归档 normal / long / tall | tall 居中铺满整页，避免被压扁 |
+| 噪音过滤 | 自动过滤点赞引导、署名、关注卡片、推荐阅读、追踪像素 | 跑完打印汇总，详情见 manifest 的 `filtered` |
+| 封面去重 | 第 1 页相邻封面图按 mmbiz token 前缀比对去重 | 避免 og:image 与正文头图重复 |
 
 ## 页脚品牌配置
 
 左下角文字默认空，按以下优先级解析：
 
-1. CLI 参数：`node md-to-xhs.mjs <md> --footer "你的品牌"`
-2. md frontmatter：文章顶部加 `footer: 你的品牌`
+1. CLI 参数：`node md-to-xhs.mjs <md/html/URL> --footer "你的品牌"`
+2. md frontmatter：文章顶部加 `footer: 你的品牌`（HTML 输入不支持 frontmatter）
 3. 配置文件：`~/.config/md-to-xhs.json` 写 `{"footer": "你的品牌"}`
 4. 默认空（左下空白，右下页码仍保留）
 
@@ -106,8 +135,8 @@ node ~/.claude/skills/yuelu-xhs/md-to-xhs.mjs <md路径>
 ## 改图
 
 如果用户对某页不满意：
-- **改文字** → 改原文 md 对应段落 → 重跑脚本
-- **改图位置** → 在 md 里挪 `![]()` 引用 → 重跑脚本
+- **改文字** → 改原文 md/html 对应段落 → 重跑脚本
+- **改图位置** → 在 md 里挪 `![]()` 引用，或在 HTML 里调整 `<img>` 位置 → 重跑脚本
 - **不要直接改 PNG**，所有改动通过原文驱动
 
 ## 历史踩坑（重要）
